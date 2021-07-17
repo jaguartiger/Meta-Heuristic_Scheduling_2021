@@ -1,0 +1,15 @@
+对于Memetic_MSF是混合元启发式算法的计算执行文件，由以下部分依次组成：
+
+第一部分，初始化种群，一个if-else结构可以选择两种类型，一种是完全随机初始解；一种是5个启发式算法最优解，剩余95个是随机解
+第二部分，计算个体和种群适应度函数，因为有global变量，所以必须在主函数文件中定义
+第三部分，一个变异辅助函数和交叉变异函数
+第四部分，__name__=='__main__'函数，执行N次混合元启发式算法
+
+
+Genetic_MSF是单纯使用遗传算法的计算执行文件，在交叉变异函数中可以选择最后变异部分是否使用文化算法模块
+
+Genetic_Machine是单纯使用遗传算法进行资源分配方案计算的执行文件
+
+Genetic_Machine、Genetic_MSF运算完后，都可以在Python Console输入output(record_hifi,record_fi,somin,'date',i)将计算结果导出到外部文件Schedule_Output.xls
+
+绘图主要在jupyter notebook的“Drawing_1223”中完成。
