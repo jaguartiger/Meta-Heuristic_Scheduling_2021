@@ -80,7 +80,7 @@ if 1==1:  # if下的种群是完全随机解
             js[m]=schedule_wt[m].copy() # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
             shuffle(js[m])
 # 第46行
-else:  # else中5个是启发式算法最优解，剩余95个是完全随机解
+else:  # else进一步分为两部分，if是完全随机初始种群，只使用启发式最优解的班组分配方案；else中有5个是启发式算法最优解，剩余95个是全随机解
 # 以下schedule_wt是启发式算法求出的结果，schedule_wt是个体解，用于元启发式算法还要把工时为0的工序zerowt添加到启发式算法得出的schedule_wt中
     schedule_wt = {1: [(3, 1), (10, 1), (2, 2), (8, 1), (11, 2), (4, 1)],
                    2: [(9, 1), (5, 1), (2, 1), (6, 2), (11, 1), (1, 1), (8, 2), (0, 3), (4, 3)],
@@ -93,13 +93,19 @@ else:  # else中5个是启发式算法最优解，剩余95个是完全随机解
     bi_bench=schedule_wt
     for i in range(100):  # 先把初始schedule_wt复制为种群中的每一个个体
         solution.append(schedule_wt.copy())
-    for js in solution[0:95]:  # 12.21修改，前95个解需要打乱
-        for m in range(1, 8):
-            js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
-            shuffle(js[m])
-    for js in solution[95:100]:  # 12.21修改，后5个解是启发式算法的最优解
-        for m in range(1, 8):
-            js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+    if 3==3:    # 2021.7.18 再增加一个逻辑，使用启发式算法解，If部分是只使用班组分配方案的完全随机初始种群，else部分是有5个初始个体为启发式算法解,剩余
+        for js in solution:           # 95个解为使用相同班组分配方案的随机解
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+                shuffle(js[m])
+    else:
+        for js in solution[0:95]:  # 12.21修改，前95个解需要打乱
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+                shuffle(js[m])
+        for js in solution[95:100]:  # 12.21修改，后5个解是启发式算法的最优解
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
 
 lent = [0, len(bi_bench[1]), len(bi_bench[2]), len(bi_bench[3]), len(bi_bench[4]), len(bi_bench[5]), len(bi_bench[6]),
         len(bi_bench[7])]  # 用在交叉变异函数中作为global变量，为1-7台机器的工序任务数量
@@ -713,6 +719,603 @@ def cromut(cso, mf, avg):  # 交叉变异函数，输入为种群，返回为交
 
     return cro_cso  # 返回经过交叉、变异后的种群
 
+def mut1(cro_cso, mf):
+    global bi_bench
+    global lent
+    mutrt1 = 0.5  # 变异概率
+    mutrt2 = 0.8  # 第二种变异概率
+
+    cro_csox = oss(cro_cso)  # 单独把变异函数拿出来并迭代运行需要
+    cro_cso = cro_csox[0]  # 单独把变异函数拿出来并迭代运行需要
+
+    for sol in cro_cso:
+        #         print('开始第',cro_cso.index(sol),'个解')
+        sma, fma = fitcalu(sol)  # 求解sol的开工时间矩阵sma和完工时间矩阵fma
+        #         print('初始计算适应度完成')
+        po = np.where(fma == max(fma.flat))  # 求完工时间矩阵最后一个完工任务的产品号工序号，po是一个tuple，有两个元素，分别是行号向量和列号向量
+
+        # 12.25作废，由更精确的下面模块取代。以下是第一类变异，对调度方案最后一个产品工序，将该产品的第一道工序置于最先开始
+        #         for key,value in sol.items( ):
+        #             if (po[0][0],0) in value:
+        #                 while value.index((po[0][0],0))!=0:
+        #                     indmu=value.index((po[0][0],0))
+        #                     if random.random()<0.5:
+        #                         sol[key][indmu-1],sol[key][indmu]=sol[key][indmu],sol[key][indmu-1]
+        #                     if random.random()<0.8:
+        #                         break
+        #                 break
+        #         rsol=oss([sol])  # 交换后，先解锁，然后再计算适应度
+        #         sol=rsol[0][0]
+        #         sma,fma=fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+
+        # 第301行，12.25创建的第一类变异，至第426行，是关键路径工序处理模块
+        p0 = po[0][0]  # 最后完工工序的产品
+        p1 = po[1][0]  # 最后完工工序的工序
+        p2 = p1 - 1  # 最后完工产品工序的上一工序号
+        pini = None  # 产品p0的第一个工序（工时不为0）
+        pini_e = None  # 在下一个while中用来判断是否直到产品的第0个工序，仍然找不到可调整缩短的工序
+        for i in range(task_wt.shape[1] - 1):  # 找到产品p0的实际第一个工序的序号pini
+            if task_wt[p0][i] != 0:
+                pini = i
+                break
+        p0m = []  # 12.26添加，记录最后完工产品p0的所有前面无间隙工序，用于第395行新增的条件
+        while True:  # 本循环的目的，就是要找到最后完工产品p0从最后一个工序p1开始，第一个前面没有间隙（上一工序完工时间不等于本工序开工时间）的工序
+            if fma[p0][p2] != 0 and fma[p0][p1] != 0:
+                if sma[p0][p1] > fma[p0][p2] and p2 != pini:
+                    p0m.append(p1)
+                    p1 -= 1
+                    p2 -= 1
+                elif sma[p0][p1] == fma[p0][p2] and p2 == pini:
+                    pini_e = 1
+                    break
+                elif sma[p0][p1] > fma[p0][p2] and p2 == pini:
+                    p0m.append(p1)
+                    break
+                else:
+                    p1 -= 1
+                    p2 -= 1
+            elif fma[p0][p2] == 0 and fma[p0][p1] != 0:
+                p2 -= 1
+            elif fma[p0][p2] != 0 and fma[p0][p1] == 0:
+                p1 -= 1
+            else:
+                p1 -= 1
+                p2 -= 1
+        p0m.sort()
+        # 上述while结束后的p1，就是需要通过自身与紧左工序交换（当p1不为最后一个工序时）或者让紧左工序利用左侧空隙（当p1是最后一个工序时必须采用，当p1不是最后一个工序时也可以采用）
+        kpm = 0
+        lpm = 0
+        llpm = 0
+        if len(p0m) != 0:
+            kpm = [key for key, value in sol.items() if (p0, p0m[-1]) in value][0]  # 最后一个工序所在的机器
+            lpm = sol[kpm].index((p0, p0m[-1]))  # 需要处理的p1工序在机器kpm上的index
+            llpm = lpm - 1  # 紧临的左侧工序
+        if len(p0m) == 0 and pini_e == 1:  # 此时，产品p0的第一个工序p2/pini需要交换到前面
+            kpm1 = [key for key, value in sol.items() if (p0, p2) in value][0]  # 最后一个工序所在的机器
+            lpm1 = sol[kpm1].index((p0, p2))  # 需要处理的p1工序在机器kpm上的index
+            if lpm1 != 0:  # 保证不在机器的第一道工序
+                lpm1_p = random.randint(0, lpm1 - 1)
+                sol[kpm1][lpm1_p], sol[kpm1][lpm1] = sol[kpm1][lpm1], sol[kpm1][lpm1_p]
+                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                sol = rsol[0][0]
+                sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+        elif p0m[-1] == po[1][0]:  # 说明产品p0的最后一个工序前面没有间隙，需要通过紧临左侧工序填补左侧空袭，通过有空隙左侧工序的前道工序交换
+            while True:  # 目的是找到p1左侧前面没有间隙的工序llpm，好在解sol不存在工时为0的工序
+                if llpm == 0:  # 说明一直到机器kpm的第一道工序，前面才有间隙
+                    break
+                elif sma[sol[kpm][llpm][0]][sol[kpm][llpm][1]] > fma[sol[kpm][llpm - 1][0]][sol[kpm][llpm - 1][1]]:
+                    break
+                else:
+                    llpm -= 1
+            lp0 = sol[kpm][llpm][0]  # 需要缩短间隙的产品号
+            lp1 = sol[kpm][llpm][1] - 1  # 需要缩短间隙的产品工序号
+            while fma[sol[kpm][llpm][0]][lp1] == 0:  # 确保lp1是产品lp0的sol[kpm][llpm][1]工序的上一工时非零工序
+                lp1 -= 1
+            lp2 = lp1 - 1  # lp1的上一工序
+            lpini = None  # 产品lp0的第一个工序（工时不为0）
+            lpini_e = None  # 说明产品lp0只有第一个工序lpini才能交换
+            for j in range(task_wt.shape[1] - 1):
+                if task_wt[lp0][j] != 0:
+                    lpini = j
+                    break
+            while True:
+                if fma[lp0][lp1] != 0 and fma[lp0][lp2] != 0:
+                    if sma[lp0][lp1] > fma[lp0][lp2]:
+                        break
+                    elif sma[lp0][lp1] == fma[lp0][lp2] and lp2 == lpini:
+                        lpini_e = 1
+                        break
+                    else:
+                        lp1 -= 1
+                        lp2 -= 1
+                elif fma[lp0][lp1] == 0 and fma[lp0][lp2] == 0:
+                    lp1 -= 1
+                    lp2 -= 1
+                elif fma[lp0][lp1] != 0 and fma[lp0][lp2] == 0:
+                    lp2 -= 1
+                elif fma[lp0][lp1] == 0 and fma[lp0][lp2] != 0:
+                    lp1 -= 1
+            if lpini_e == 1:
+                kpm3 = [key for key, value in sol.items() if (lp0, lp2) in value][0]
+                lpm3 = sol[kpm3].index((lp0, lp2))
+                sol[kpm3][lpm3], sol[kpm3][lpm3 - 1] = sol[kpm3][lpm3 - 1], sol[kpm3][lpm3]
+                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                sol = rsol[0][0]
+                sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+            else:
+                kpm4 = [key for key, value in sol.items() if (lp0, lp1) in value][0]
+                lpm4 = sol[kpm4].index((lp0, lp1))
+                if sol[kpm4][lpm4 - 1][0] != p0:  # 第395行，12.26添加的条件，可能紧左工序是最后完工产品p0的工序，此时只能交换p0的前面无间隙工序
+                    sol[kpm4][lpm4], sol[kpm4][lpm4 - 1] = sol[kpm4][lpm4 - 1], sol[kpm4][lpm4]
+                    rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                    sol = rsol[0][0]
+                    sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+                else:
+                    p00 = None
+                    if p0m[0] > sol[kpm4][lpm4 - 1][1]:
+                        p00 = pini
+                    else:
+                        for i in p0m:
+                            if i == sol[kpm4][lpm4 - 1][1]:
+                                p00 = i
+                                break
+                            elif i > sol[kpm4][lpm4 - 1][1]:
+                                p00 = p0m[p0m.index(i) - 1]
+                                break
+                    kpm5 = [key for key, value in sol.items() if (p0, p00) in value][0]
+                    lpm5 = sol[kpm5].index((p0, p00))
+                    if lpm5 != 0:  # 仅仅适用于当p00==pini的情况，因为其它p0m的工序不可能是相应机器的第一道工序
+                        sol[kpm5][lpm5], sol[kpm5][lpm5 - 1] = sol[kpm5][lpm5 - 1], sol[kpm5][lpm5]
+                        rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                        sol = rsol[0][0]
+                        sma, fma = fitcalu(sol)
+
+        else:  # 说明p1不是最后一个工序，且p2不是第一个工序，所以要通过交换p1与其左侧工序或者通过左侧工序前移
+            kpm2 = [key for key, value in sol.items() if (p0, p1) in value][0]
+            lpm2 = sol[kpm2].index((p0, p1))
+            sol[kpm2][lpm2], sol[kpm2][lpm2 - 1] = sol[kpm2][lpm2 - 1], sol[kpm2][lpm2]
+            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+            sol = rsol[0][0]
+            sma, fma = fitcalu(sol)  # 第426行，第一类变异，关键路径工序处理模块结束
+
+        # 主动修复：由于最后一个工序的机器只生产最后一个工序，所以尽一切可能地消除间隙，只要消除就一定能缩短总工时
+        for xmai in [6, 7]:  #
+            for ppr in range(len(sol[xmai]) - 1):
+                if ppr == 0:
+                    if fma[sol[xmai][1][0]][pj_pre(fma, sol, xmai, 1)] < sma[sol[xmai][0][0]][
+                        4]:  # 如果后面产品工序的前一工序完工时间更早，就交换
+                        sol[xmai][0], sol[xmai][1] = sol[xmai][1], sol[xmai][0]
+                        rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                        sol = rsol[0][0]
+                        #                         sma,fma=fitcalu(rsol[0][0])
+                        sma, fma = fitcalu(sol)  # *** 很重要，一定要再计算一遍求解sol的开工时间矩阵sma和完工时间矩阵fma
+                else:
+                    if fma[sol[xmai][ppr - 1][0]][4] < sma[sol[xmai][ppr][0]][4]:  # 说明在当前产品工序ppr前有间隙
+                        if fma[sol[xmai][ppr + 1][0]][pj_pre(fma, sol, xmai, ppr + 1)] < sma[sol[xmai][ppr][0]][4]:
+                            sol[xmai][ppr], sol[xmai][ppr + 1] = sol[xmai][ppr + 1], sol[xmai][ppr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)  # *** 很重要，每次交换完之后都要再计算一遍，求sol的开工时间矩阵sma和完工时间矩阵fma
+        # 第二类变异，更复杂一些，先寻找间隙、记录，然后根据权重或者知识指导来交换间隙右边的两个相邻工序
+        for xxma in range(1, 6):
+            for xr in range(len(sol[xxma]) - 1):
+                if xr == 0:  # 对于机器的第一道工序
+                    if pj_ri(fma, sol, xxma, xr) != 0:  # 只有当该工序不是第0道工序
+                        if pj_ri(fma, sol, xxma, 1) == 0:  # 如果右边的产品工序是第0个工序，那么就直接交换
+                            sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif pj_ri(fma, sol, xxma, 1) != 0 and fma[sol[xxma][1][0]][pj_pre(fma, sol, xxma, 1)] < \
+                                sma[sol[xxma][0][0]][sol[xxma][0][1]] \
+                                and sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                            pj_pre(fma, sol, xxma, 1)] >= task_wt[sol[xxma][1][0]][sol[xxma][1][1]]:
+                            sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)  # 如果第二个产品工序不是第0个工序，但是满足交换条件，就交换
+                        elif pj_ri(fma, sol, xxma, 1) != 0 and fma[sol[xxma][1][0]][pj_pre(fma, sol, xxma, 1)] < \
+                                sma[sol[xxma][0][0]][sol[xxma][0][1]] \
+                                and sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                            pj_pre(fma, sol, xxma, 1)] < task_wt[sol[xxma][1][0]][sol[xxma][1][1]]:
+                            # 如果不满足直接交换条件，就将上一工序完工时间差记录下来
+                            interva1 = (sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                                pj_pre(fma, sol, xxma, 1)]) / task_wt[sol[xxma][1][0]][sol[xxma][1][1]]
+                            if random.random() < interva1 * 0.7:
+                                sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                                sol = rsol[0][0]
+                                sma, fma = fitcalu(sol)
+                            backin(sol, xxma, xr)  # 12.24添加，然后再判断是否满足后向交换
+
+                else:
+                    if pj_ri(fma, sol, xxma, xr) == 0:  # *** 如果是产品的第0道工序，自身没有间隙，根据后续间隙来判断是否直接交换
+                        backin(sol, xxma, xr)  # 后向交换判断
+                    else:
+                        if fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and pj_ri(fma, sol, xxma, xr + 1) == 0:
+                            # 如果前面有间隙，且右边是产品的第0道工序，就直接交换
+                            sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] < sma[sol[xxma][xr][0]][sol[xxma][xr][1]] and \
+                                min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                    sol[xxma][xr - 1][1]],
+                                    sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                        pj_pre(fma, sol, xxma, xr + 1)]) >= task_wt[sol[xxma][xr + 1][0]][
+                            sol[xxma][xr + 1][1]]:
+                            # 如果前面有间隙，右边不是产品的第0道工序但满足直接交换条件，就直接交换
+                            sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] < sma[sol[xxma][xr][0]][sol[xxma][xr][1]] and \
+                                min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                    sol[xxma][xr - 1][1]],
+                                    sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                        pj_pre(fma, sol, xxma, xr + 1)]) < task_wt[sol[xxma][xr + 1][0]][
+                            sol[xxma][xr + 1][1]]:
+                            interva2 = min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                sol[xxma][xr - 1][1]],
+                                           sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                               pj_pre(fma, sol, xxma, xr + 1)]) / task_wt[sol[xxma][xr + 1][0]][
+                                           sol[xxma][xr + 1][1]]
+                            if random.random() < interva2 * 0.7:
+                                sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                                sol = rsol[0][0]
+                                sma, fma = fitcalu(sol)  # 如果第二个产品工序不是第0个工序，但是满足交换条件，就交换
+                            # 如果前面有间隙，右边不是产品的第0道工序且不满足直接交换条件，就记录在interval
+                            backin(sol, xxma, xr)  # 12.24添加，然后判断后向交换情况
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] == sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] <= sma[sol[xxma][xr][0]][sol[xxma][xr][1]]:
+                            backin(sol, xxma, xr)  # 整个elif都是12.24新添加，如果没有间隙，但交换后xr+1能按相同时间开工，就判断后向交换
+                        else:  # 右边工序的上一工序完成时间更晚，如果交换会更糟，就不交换
+                            pass
+                            # 以下模块是再对剩余的潜在交换产品工序进行处理，只交换间隙最大的产品工序
+        #         inte_ma={} # 键是机器，值是最大的间隙值
+        #         inte_ma_inde={} # 键是机器，值是最大间隙值所在的index
+        #         hamm_d=0  # 在此记录变异的机器，如果该机器已发生变异，那么后面的知识指导变异就要排除这台机器
+        #         for kim,vim in interval.items():
+        #             inte_ma[kim]=max(vim)
+        #             inte_ma_inde[kim]=vim.index(max(vim))
+        #         for kinm,vinm in inte_ma.items():
+        #             if max(inte_ma.values())==vinm:
+        #                 if random.random()<mutrt1:  # 并且变异概率为mutrt
+        #                     hamm_d=kinm
+        #                     sol[kinm][inte_ma_inde[kinm]],sol[kinm][inte_ma_inde[kinm]+1]=sol[kinm][inte_ma_inde[kinm]+1],sol[kinm][inte_ma_inde[kinm]]
+        #                 break
+
+        # 以下模块是文化算法，用状况知识，即历代最优解指导变异（局部搜索）
+        # 1.1 首先将当前解和历代最优解mf转化为二进制型
+        bi_sol = {}  # 调度方案/解sol的二进制表示型
+        bi_mf = {}  # 历代最优解mf的二进制表示型
+        for ibi in bi_bench:
+            bi_sol[ibi] = []
+            bi_mf[ibi] = []
+            for jbi in bi_bench[ibi]:
+                for qbi in bi_bench[ibi][bi_bench[ibi].index(jbi) + 1:]:
+                    if sol[ibi].index(jbi) < sol[ibi].index(qbi):
+                        bi_sol[ibi].append(1)
+                    if sol[ibi].index(jbi) > sol[ibi].index(qbi):
+                        bi_sol[ibi].append(0)
+                    if mf[ibi].index(jbi) < mf[ibi].index(qbi):
+                        bi_mf[ibi].append(1)
+                    if mf[ibi].index(jbi) > mf[ibi].index(qbi):
+                        bi_mf[ibi].append(0)
+        # 1.2 然后计算当前解和历代解海明距离最大的染色体，并找到不一样且间隙最大的基因，进行变异
+        calhai_bi = {}  # 当前解与历代最优解海明距离字典，键是机器，值是机器对应染色体的海明距离
+        for smm in range(1, 6):
+            calhai_bi[smm] = 0
+            for isc in range(len(bi_mf[smm])):
+                if bi_mf[smm][isc] != bi_sol[smm][isc]:
+                    calhai_bi[smm] += 1
+        hmma = 0  # 海明距离最大的机器
+        for ck, cv in calhai_bi.items():
+            if cv == max(calhai_bi.values()):
+                hmma = ck
+                break
+        lde = random.randint(0, len(sol[hmma]) - 2)
+        if random.random() < mutrt2:
+            sol[hmma][lde], sol[hmma][lde + 1] = sol[hmma][lde + 1], sol[hmma][lde]
+
+    return cro_cso  # 返回经过交叉、变异后的种群
+
+def mut2(cro_cso, mf):  # 第二个变异函数mut2，比mut1好用，先变异前向间隙后向间隙，再变异关键路径工序
+    global bi_bench
+    global lent
+    mutrt1 = 0.5  # 变异概率
+    mutrt2 = 0.8  # 第二种变异概率
+
+    cro_csox = oss(cro_cso)  # 单独把变异函数拿出来并迭代运行需要
+    cro_cso = cro_csox[0]  # 单独把变异函数拿出来并迭代运行需要
+
+    for sol in cro_cso:
+        #         print('开始第',cro_cso.index(sol),'个解')
+
+        sma, fma = fitcalu(sol)
+        # 主动修复：由于最后一个工序的机器只生产最后一个工序，所以尽一切可能地消除间隙，只要消除就一定能缩短总工时
+        for xmai in [6, 7]:  #
+            for ppr in range(len(sol[xmai]) - 1):
+                if ppr == 0:
+                    if fma[sol[xmai][1][0]][pj_pre(fma, sol, xmai, 1)] < sma[sol[xmai][0][0]][
+                        4]:  # 如果后面产品工序的前一工序完工时间更早，就交换
+                        sol[xmai][0], sol[xmai][1] = sol[xmai][1], sol[xmai][0]
+                        rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                        sol = rsol[0][0]
+                        #                         sma,fma=fitcalu(rsol[0][0])
+                        sma, fma = fitcalu(sol)  # *** 很重要，一定要再计算一遍求解sol的开工时间矩阵sma和完工时间矩阵fma
+                else:
+                    if fma[sol[xmai][ppr - 1][0]][4] < sma[sol[xmai][ppr][0]][4]:  # 说明在当前产品工序ppr前有间隙
+                        if fma[sol[xmai][ppr + 1][0]][pj_pre(fma, sol, xmai, ppr + 1)] < sma[sol[xmai][ppr][0]][4]:
+                            sol[xmai][ppr], sol[xmai][ppr + 1] = sol[xmai][ppr + 1], sol[xmai][ppr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)  # *** 很重要，每次交换完之后都要再计算一遍，求sol的开工时间矩阵sma和完工时间矩阵fma
+        # 第二类变异，更复杂一些，先寻找间隙、记录，然后根据权重或者知识指导来交换间隙右边的两个相邻工序
+        for xxma in range(1, 6):
+            for xr in range(len(sol[xxma]) - 1):
+                if xr == 0:  # 对于机器的第一道工序
+                    if pj_ri(fma, sol, xxma, xr) != 0:  # 只有当该工序不是第0道工序
+                        if pj_ri(fma, sol, xxma, 1) == 0:  # 如果右边的产品工序是第0个工序，那么就直接交换
+                            sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif pj_ri(fma, sol, xxma, 1) != 0 and fma[sol[xxma][1][0]][pj_pre(fma, sol, xxma, 1)] < \
+                                sma[sol[xxma][0][0]][sol[xxma][0][1]] \
+                                and sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                            pj_pre(fma, sol, xxma, 1)] >= task_wt[sol[xxma][1][0]][sol[xxma][1][1]]:
+                            sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)  # 如果第二个产品工序不是第0个工序，但是满足交换条件，就交换
+                        elif pj_ri(fma, sol, xxma, 1) != 0 and fma[sol[xxma][1][0]][pj_pre(fma, sol, xxma, 1)] < \
+                                sma[sol[xxma][0][0]][sol[xxma][0][1]] \
+                                and sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                            pj_pre(fma, sol, xxma, 1)] < task_wt[sol[xxma][1][0]][sol[xxma][1][1]]:
+                            # 如果不满足直接交换条件，就将上一工序完工时间差记录下来
+                            interva1 = (sma[sol[xxma][0][0]][sol[xxma][0][1]] - fma[sol[xxma][1][0]][
+                                pj_pre(fma, sol, xxma, 1)]) / task_wt[sol[xxma][1][0]][sol[xxma][1][1]]
+                            if random.random() < interva1 * 0.7:
+                                sol[xxma][0], sol[xxma][1] = sol[xxma][1], sol[xxma][0]
+                                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                                sol = rsol[0][0]
+                                sma, fma = fitcalu(sol)
+                            backin(sol, xxma, xr)  # 12.24添加，然后再判断是否满足后向交换
+
+                else:
+                    if pj_ri(fma, sol, xxma, xr) == 0:  # *** 如果是产品的第0道工序，自身没有间隙，根据后续间隙来判断是否直接交换
+                        backin(sol, xxma, xr)  # 后向交换判断
+                    else:
+                        if fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and pj_ri(fma, sol, xxma, xr + 1) == 0:
+                            # 如果前面有间隙，且右边是产品的第0道工序，就直接交换
+                            sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] < sma[sol[xxma][xr][0]][sol[xxma][xr][1]] and \
+                                min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                    sol[xxma][xr - 1][1]],
+                                    sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                        pj_pre(fma, sol, xxma, xr + 1)]) >= task_wt[sol[xxma][xr + 1][0]][
+                            sol[xxma][xr + 1][1]]:
+                            # 如果前面有间隙，右边不是产品的第0道工序但满足直接交换条件，就直接交换
+                            sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                            sol = rsol[0][0]
+                            sma, fma = fitcalu(sol)
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] < sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] < sma[sol[xxma][xr][0]][sol[xxma][xr][1]] and \
+                                min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                    sol[xxma][xr - 1][1]],
+                                    sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                        pj_pre(fma, sol, xxma, xr + 1)]) < task_wt[sol[xxma][xr + 1][0]][
+                            sol[xxma][xr + 1][1]]:
+                            interva2 = min(sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr - 1][0]][
+                                sol[xxma][xr - 1][1]],
+                                           sma[sol[xxma][xr][0]][sol[xxma][xr][1]] - fma[sol[xxma][xr + 1][0]][
+                                               pj_pre(fma, sol, xxma, xr + 1)]) / task_wt[sol[xxma][xr + 1][0]][
+                                           sol[xxma][xr + 1][1]]
+                            if random.random() < interva2 * 0.7:
+                                sol[xxma][xr], sol[xxma][xr + 1] = sol[xxma][xr + 1], sol[xxma][xr]
+                                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                                sol = rsol[0][0]
+                                sma, fma = fitcalu(sol)  # 如果第二个产品工序不是第0个工序，但是满足交换条件，就交换
+                            # 如果前面有间隙，右边不是产品的第0道工序且不满足直接交换条件，就记录在interval
+                            backin(sol, xxma, xr)  # 12.24添加，然后判断后向交换情况
+                        elif fma[sol[xxma][xr - 1][0]][sol[xxma][xr - 1][1]] == sma[sol[xxma][xr][0]][
+                            sol[xxma][xr][1]] and \
+                                pj_ri(fma, sol, xxma, xr + 1) != 0 and fma[sol[xxma][xr + 1][0]][
+                            pj_pre(fma, sol, xxma, xr + 1)] <= sma[sol[xxma][xr][0]][sol[xxma][xr][1]]:
+                            backin(sol, xxma, xr)  # 整个elif都是12.24新添加，如果没有间隙，但交换后xr+1能按相同时间开工，就判断后向交换
+                        else:  # 右边工序的上一工序完成时间更晚，如果交换会更糟，就不交换
+                            pass
+
+        sma, fma = fitcalu(sol)  # 求解sol的开工时间矩阵sma和完工时间矩阵fma
+        #         print('初始计算适应度完成')
+        po = np.where(fma == max(fma.flat))  # 求完工时间矩阵最后一个完工任务的产品号工序号，po是一个tuple，有两个元素，分别是行号向量和列号向量
+
+        # 第301行，12.25创建的第一类变异，至第426行，是关键路径工序处理模块
+        p0 = po[0][0]  # 最后完工工序的产品
+        p1 = po[1][0]  # 最后完工工序的工序
+        p2 = p1 - 1  # 最后完工产品工序的上一工序号
+        pini = None  # 产品p0的第一个工序（工时不为0）
+        pini_e = None  # 在下一个while中用来判断是否直到产品的第0个工序，仍然找不到可调整缩短的工序
+        for i in range(task_wt.shape[1] - 1):  # 找到产品p0的实际第一个工序的序号pini
+            if task_wt[p0][i] != 0:
+                pini = i
+                break
+        p0m = []  # 12.26添加，记录最后完工产品p0的所有前面无间隙工序，用于第395行新增的条件
+        while True:  # 本循环的目的，就是要找到最后完工产品p0从最后一个工序p1开始，第一个前面没有间隙（上一工序完工时间不等于本工序开工时间）的工序
+            if fma[p0][p2] != 0 and fma[p0][p1] != 0:
+                if sma[p0][p1] > fma[p0][p2] and p2 != pini:
+                    p0m.append(p1)
+                    p1 -= 1
+                    p2 -= 1
+                elif sma[p0][p1] == fma[p0][p2] and p2 == pini:
+                    pini_e = 1
+                    break
+                elif sma[p0][p1] > fma[p0][p2] and p2 == pini:
+                    p0m.append(p1)
+                    break
+                else:
+                    p1 -= 1
+                    p2 -= 1
+            elif fma[p0][p2] == 0 and fma[p0][p1] != 0:
+                p2 -= 1
+            elif fma[p0][p2] != 0 and fma[p0][p1] == 0:
+                p1 -= 1
+            else:
+                p1 -= 1
+                p2 -= 1
+        # 上述while结束后的p1，就是需要通过自身与紧左工序交换（当p1不为最后一个工序时）或者让紧左工序利用左侧空隙（当p1是最后一个工序时必须采用，当p1不是最后一个工序时也可以采用）
+        p0m.sort()  # 最初得到的p0m是从大到小排列，因此需要对其从小到大排列
+        kpm = 0
+        lpm = 0
+        llpm = 0
+        if len(p0m) != 0:
+            kpm = [key for key, value in sol.items() if (p0, p0m[-1]) in value][0]  # 最后一个工序所在的机器
+            lpm = sol[kpm].index((p0, p0m[-1]))  # 需要处理的p1工序在机器kpm上的index
+            llpm = lpm - 1  # 紧临的左侧工序
+        if len(p0m) == 0 and pini_e == 1:  # 此时，产品p0的第一个工序p2/pini需要交换到前面
+            kpm1 = [key for key, value in sol.items() if (p0, p2) in value][0]  # 最后一个工序所在的机器
+            lpm1 = sol[kpm1].index((p0, p2))  # 需要处理的p1工序在机器kpm上的index
+            if lpm1 != 0:  # 保证不在机器的第一道工序
+                lpm1_p = random.randint(0, lpm1 - 1)
+                sol[kpm1][lpm1_p], sol[kpm1][lpm1] = sol[kpm1][lpm1], sol[kpm1][lpm1_p]
+                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                sol = rsol[0][0]
+                sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+        elif p0m[-1] == po[1][0]:  # 说明产品p0的最后一个工序前面没有间隙，需要通过紧临左侧工序填补左侧空袭，通过有空隙左侧工序的前道工序交换
+            while True:  # 目的是找到p1左侧前面没有间隙的工序llpm，好在解sol不存在工时为0的工序
+                if llpm == 0:  # 说明一直到机器kpm的第一道工序，前面才有间隙
+                    break
+                elif sma[sol[kpm][llpm][0]][sol[kpm][llpm][1]] > fma[sol[kpm][llpm - 1][0]][sol[kpm][llpm - 1][1]]:
+                    break
+                else:
+                    llpm -= 1
+            lp0 = sol[kpm][llpm][0]  # 需要缩短间隙的产品号
+            lp1 = sol[kpm][llpm][1] - 1  # 需要缩短间隙的产品工序号
+            while fma[sol[kpm][llpm][0]][lp1] == 0:  # 确保lp1是产品lp0的sol[kpm][llpm][1]工序的上一工时非零工序
+                lp1 -= 1
+            lp2 = lp1 - 1  # lp1的上一工序
+            lpini = None  # 产品lp0的第一个工序（工时不为0）
+            lpini_e = None  # 说明产品lp0只有第一个工序lpini才能交换
+            for j in range(task_wt.shape[1] - 1):
+                if task_wt[lp0][j] != 0:
+                    lpini = j
+                    break
+            while True:
+                if fma[lp0][lp1] != 0 and fma[lp0][lp2] != 0:
+                    if sma[lp0][lp1] > fma[lp0][lp2]:
+                        break
+                    elif sma[lp0][lp1] == fma[lp0][lp2] and lp2 == lpini:
+                        lpini_e = 1
+                        break
+                    else:
+                        lp1 -= 1
+                        lp2 -= 1
+                elif fma[lp0][lp1] == 0 and fma[lp0][lp2] == 0:
+                    lp1 -= 1
+                    lp2 -= 1
+                elif fma[lp0][lp1] != 0 and fma[lp0][lp2] == 0:
+                    lp2 -= 1
+                elif fma[lp0][lp1] == 0 and fma[lp0][lp2] != 0:
+                    lp1 -= 1
+            if lpini_e == 1:
+                kpm3 = [key for key, value in sol.items() if (lp0, lp2) in value][0]
+                lpm3 = sol[kpm3].index((lp0, lp2))
+                sol[kpm3][lpm3], sol[kpm3][lpm3 - 1] = sol[kpm3][lpm3 - 1], sol[kpm3][lpm3]
+                rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                sol = rsol[0][0]
+                sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+            else:
+                kpm4 = [key for key, value in sol.items() if (lp0, lp1) in value][0]
+                lpm4 = sol[kpm4].index((lp0, lp1))
+                if sol[kpm4][lpm4 - 1][0] != p0:  # 第395行，12.26添加的条件，可能紧左工序是最后完工产品p0的工序，此时只能交换p0的前面无间隙工序
+                    sol[kpm4][lpm4], sol[kpm4][lpm4 - 1] = sol[kpm4][lpm4 - 1], sol[kpm4][lpm4]
+                    rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                    sol = rsol[0][0]
+                    sma, fma = fitcalu(sol)  # *** 注意，这里也要重新计算一遍
+                else:
+                    p00 = None
+                    if p0m[0] > sol[kpm4][lpm4 - 1][1]:
+                        p00 = pini
+                    else:
+                        for i in p0m:
+                            if i == sol[kpm4][lpm4 - 1][1]:
+                                p00 = i
+                                break
+                            elif i > sol[kpm4][lpm4 - 1][1]:
+                                p00 = p0m[p0m.index(i) - 1]
+                                break
+                    kpm5 = [key for key, value in sol.items() if (p0, p00) in value][0]
+                    lpm5 = sol[kpm5].index((p0, p00))
+                    if lpm5 != 0:  # 仅仅适用于当p00==pini的情况，因为其它p0m的工序不可能是相应机器的第一道工序
+                        sol[kpm5][lpm5], sol[kpm5][lpm5 - 1] = sol[kpm5][lpm5 - 1], sol[kpm5][lpm5]
+                        rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+                        sol = rsol[0][0]
+                        sma, fma = fitcalu(sol)
+
+        else:  # 说明p1不是最后一个工序，且p2不是第一个工序，所以要通过交换p1与其左侧工序或者通过左侧工序前移
+            kpm2 = [key for key, value in sol.items() if (p0, p1) in value][0]
+            lpm2 = sol[kpm2].index((p0, p1))
+            sol[kpm2][lpm2], sol[kpm2][lpm2 - 1] = sol[kpm2][lpm2 - 1], sol[kpm2][lpm2]
+            rsol = oss([sol])  # 交换后，先解锁，然后再计算适应度
+            sol = rsol[0][0]
+            sma, fma = fitcalu(sol)  # 第426行，第一类变异，关键路径工序处理模块结束
+
+        # 以下模块是文化算法，用状况知识，即历代最优解指导变异（局部搜索）
+        # 1.1 首先将当前解和历代最优解mf转化为二进制型
+        bi_sol = {}  # 调度方案/解sol的二进制表示型
+        bi_mf = {}  # 历代最优解mf的二进制表示型
+        for ibi in bi_bench:
+            bi_sol[ibi] = []
+            bi_mf[ibi] = []
+            for jbi in bi_bench[ibi]:
+                for qbi in bi_bench[ibi][bi_bench[ibi].index(jbi) + 1:]:
+                    if sol[ibi].index(jbi) < sol[ibi].index(qbi):
+                        bi_sol[ibi].append(1)
+                    if sol[ibi].index(jbi) > sol[ibi].index(qbi):
+                        bi_sol[ibi].append(0)
+                    if mf[ibi].index(jbi) < mf[ibi].index(qbi):
+                        bi_mf[ibi].append(1)
+                    if mf[ibi].index(jbi) > mf[ibi].index(qbi):
+                        bi_mf[ibi].append(0)
+        # 1.2 然后计算当前解和历代解海明距离最大的染色体，并找到不一样且间隙最大的基因，进行变异
+        calhai_bi = {}  # 当前解与历代最优解海明距离字典，键是机器，值是机器对应染色体的海明距离
+        for smm in range(1, 6):
+            calhai_bi[smm] = 0
+            for isc in range(len(bi_mf[smm])):
+                if bi_mf[smm][isc] != bi_sol[smm][isc]:
+                    calhai_bi[smm] += 1
+        hmma = 0  # 海明距离最大的机器
+        for ck, cv in calhai_bi.items():
+            if cv == max(calhai_bi.values()):
+                hmma = ck
+                break
+        lde = random.randint(0, len(sol[hmma]) - 2)
+        if random.random() < mutrt2:
+            sol[hmma][lde], sol[hmma][lde + 1] = sol[hmma][lde + 1], sol[hmma][lde]
+
+    return cro_cso  # 返回经过交叉、变异后的种群
+
 
 '''第四部分，迭代计算主函数'''
 if __name__=="__main__":
@@ -728,41 +1331,86 @@ if __name__=="__main__":
     # avg=sum(csofit)/len(csofit)
     # cro_cso=cromut(cso,hi5[0],avg) # 第715行，第一次交叉变异，得到交叉变异后的种群cro_cso
 
-    # 7、遗传算法的循环执行体
-    i=0
-    cro_cso = solution # 第719行和第720行可以替代上面的第706至第715行
-    hifit5 = [70, 75]  # 第720行
+    # 2021.7.18增加if-else结构，if部分是混合元启发式算法，else部分是纯变异模块体
+    if 1==2:
+        i=0
+        cro_cso = solution # 第719行和第720行可以替代上面的第706至第715行
+        hifit5 = [70, 75]  # 第720行
 
-    # fimin=[22,22]   最终前两个最优解的适应度,12.20修改，为bi_bench解的适应度
-    fimin=[hifit5[0],hifit5[1]] # 12.28修改，替代上一行，最初是初始种群前两个最优解的目标函数值
-    somin=[bi_bench,bi_bench] # 最终前两个最优解，12.20修改，不能为0，改为bi_bench
-    record_fi=[]
-    record_hifi=[] # 记录每一代最优解的目标函数值
-    num_cso=[] # 记录每一代轮盘赌选出的不同个体数
-    while i<50:
-        i+=1
-        print('开始第',i,'次')
-        bl=oss(cro_cso)  # 第二次迭代，解锁，得到解锁后的种群bl[0]
-        k1,b1=fitness_calu(bl[0])  # 计算第二代种群的适应度
-        csoo,csofito,hio5,hifito5=lunpan(bl[0],b1)
-        num_cso.append(len(idcro(csoo)))
-        record_hifi.append(hifito5[0])
-        idcheck(csoo)
-    #     st,ft=fitcalu(hio5[0])
-    #     max(ft.flat)
-    #     hifito5[0]
-        if hifito5[0]<fimin[0]:
-            fimin.remove(fimin[0])
-            fimin.insert(0,hifito5[0])
-            somin.remove(somin[0])
-            somin.insert(0,hio5[0])
-        if hifito5[1]<fimin[1]:
-            fimin.remove(fimin[1])
-            fimin.insert(1,hifito5[1])
-            somin.remove(somin[1])
-            somin.insert(1,hio5[1])
-        avg=sum(csofito)/len(csofito) # 12.28新增，当前种群解的平均值
-        cro_csoo=cromut(csoo,somin[0],avg)
-        idcheck(cro_csoo)
-        cro_cso=cro_csoo
-        record_fi.append(fimin[0])
+        # fimin=[22,22]   最终前两个最优解的适应度,12.20修改，为bi_bench解的适应度
+        fimin=[hifit5[0],hifit5[1]] # 12.28修改，替代上一行，最初是初始种群前两个最优解的目标函数值
+        somin=[bi_bench,bi_bench] # 最终前两个最优解，12.20修改，不能为0，改为bi_bench
+        record_fi=[]
+        record_hifi=[] # 记录每一代最优解的目标函数值
+        num_cso=[] # 记录每一代轮盘赌选出的不同个体数
+        while i<500:
+            i+=1
+            print('开始第',i,'次')
+            bl=oss(cro_cso)  # 第二次迭代，解锁，得到解锁后的种群bl[0]
+            k1,b1=fitness_calu(bl[0])  # 计算第二代种群的适应度
+            csoo,csofito,hio5,hifito5=lunpan(bl[0],b1)
+            num_cso.append(len(idcro(csoo)))
+            record_hifi.append(hifito5[0])
+            idcheck(csoo)
+        #     st,ft=fitcalu(hio5[0])
+        #     max(ft.flat)
+        #     hifito5[0]
+            if hifito5[0]<fimin[0]:
+                fimin.remove(fimin[0])
+                fimin.insert(0,hifito5[0])
+                somin.remove(somin[0])
+                somin.insert(0,hio5[0])
+            if hifito5[1]<fimin[1]:
+                fimin.remove(fimin[1])
+                fimin.insert(1,hifito5[1])
+                somin.remove(somin[1])
+                somin.insert(1,hio5[1])
+            avg=sum(csofito)/len(csofito) # 12.28新增，当前种群解的平均值
+            cro_csoo=cromut(csoo,somin[0],avg)
+            idcheck(cro_csoo)
+            cro_cso=cro_csoo
+            record_fi.append(fimin[0])
+
+    else:  # 使用纯变异模块进行迭代，可以选择用mut1或mut2
+        cc = solution
+        ic = 0 # 迭代次数
+
+        fimin = [75, 75]  # 12.28修改，替代上一行，最初是初始种群前两个最优解的目标函数值
+        somin = [bi_bench, bi_bench]  # 最终前两个最优解，12.20修改，不能为0，改为bi_bench
+        record_fi = []
+        record_hifi = []  # 每一代种群中的最优解的目标函数
+
+        num_cso = []  # 记录每一代轮盘赌选出的不同个体数
+        while ic < 500:
+            ic += 1
+            print('开始第', ic, '次')
+            occ = oss(cc)  # 第二次迭代，解锁，得到解锁后的种群bl[0]
+            occa, occb = fitness_calu(occ[0])  # 计算第二代种群的适应度
+
+            csoo, csofito, hio5, hifito5 = lunpan(occ[0], occb)
+            num_cso.append(len(idcro(csoo)))
+            record_hifi.append(hifito5[0])
+
+            if hifito5[0] < fimin[0]:
+                fimin.remove(fimin[0])
+                fimin.insert(0, hifito5[0])
+                somin.remove(somin[0])
+                somin.insert(0, hio5[0])
+            if hifito5[1] < fimin[1]:
+                fimin.remove(fimin[1])
+                fimin.insert(1, hifito5[1])
+                somin.remove(somin[1])
+                somin.insert(1, hio5[1])
+
+            if fimin[0] < 21:
+                print(fimin)
+                break
+            cc = mut2(csoo, bi_bench)
+            idcheck(cc)
+            record_fi.append(fimin[0])
+        print('目标函数最小值：', fimin[0])
+        print('第一次变异后解的目标函数值：', record_hifi[1])
+        print('目标函数最大值：', max(record_hifi))
+        print('解的目标函数平均值：', sum(record_hifi) / len(record_hifi))
+
+# 当__main__函数运行完之后，在python console运行Drawing.py中的函数，绘图或将计算数据导出到excel，如output(record_hifi,record_fi,somin,'7.18',1)

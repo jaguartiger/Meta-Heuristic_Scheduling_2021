@@ -22,6 +22,12 @@ def dueline(record_hifi, record_fi):
     plt.legend(loc='upper right', fontsize='small',frameon=False)
     plt.show()
 
+def xpost(record_hifi,x):
+    plt.plot([i for i in range(x, len(record_hifi))], record_hifi[x:], linewidth=0.8, marker='1', label='每代最优解')  # marker='1'
+    # plt.plot([range(7,500)],22.7,linewidth=0.8,label='启发式算法最优解')
+    plt.legend()
+    plt.show()
+
 
 # 绘制甘特图程序
 # 10、绘制解的甘特图
@@ -70,6 +76,12 @@ def output(record_hifi, record_fi, somin,date,i):  # date和i是用来命名shee
     exi = xlrd.open_workbook('C:/Users/Jaguar/Desktop/Scheduling_Output.xls', 'w+b')
     new_exi = xc.copy(exi)
     nesheet = new_exi.add_sheet(date+'调度运算'+str(i))
+
+    # h2 = [('%.1f' % i) for i in record_hifi]
+    # re_hi = [float(j) for j in h2]  #  但这几行不需要了，因为写入到excel中的本来就只保留一位小数，每代最优解，保留1位小数的结果
+    # h3 = [('%.1f' % i) for i in record_fi]  # 历史最优解的更新记录,保留一位
+    # re_fi = [float(j) for j in h3]
+
     for ind, ite in enumerate(['每代最优解', '历代最优解', '最优调度方案机器', '班组顺序', '次优调度方案机器','班组顺序' ]):
         nesheet.write(0, ind, ite, set_style('Times New Roman', 200, False))  # 写入表头
 

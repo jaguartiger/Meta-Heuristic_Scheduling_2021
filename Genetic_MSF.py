@@ -42,7 +42,7 @@ solution=[]  # 种群list，每一个元素都是一个schedule_wt个体解
 
 bi_bench = {}
 
-if 1==1:  # if下的种群是完全随机解
+if 1==2:  # if下的种群是完全随机解
 # 以下第27行至第46行是生成完全随机初始解的代码，班组分配方案job_to_wt已经事先确定了
     job_to_wt=np.array([[5, 3, 3, 5, 7],   # 第27行
     [4, 1, 1, 4, 7],
@@ -92,13 +92,19 @@ else:  # else中5个是启发式算法最优解，剩余95个是完全随机解
     bi_bench=schedule_wt
     for i in range(100):  # 先把初始schedule_wt复制为种群中的每一个个体
         solution.append(schedule_wt.copy())
-    for js in solution[0:95]:  # 12.21修改，前95个解需要打乱
-        for m in range(1, 8):
-            js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
-            shuffle(js[m])
-    for js in solution[95:100]:  # 12.21修改，后5个解是启发式算法的最优解
-        for m in range(1, 8):
-            js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+    if 3==3:  # 2021.7.18 再增加一个逻辑，使用启发式算法解，If部分是只使用班组分配方案的完全随机初始种群，else部分是有5个初始个体为启发式算法解
+        for js in solution:  # 12.21修改，前95个解需要打乱
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+                shuffle(js[m])
+    else:
+        for js in solution[0:95]:  # 12.21修改，前95个解需要打乱
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
+                shuffle(js[m])
+        for js in solution[95:100]:  # 12.21修改，后5个解是启发式算法的最优解
+            for m in range(1, 8):
+                js[m] = schedule_wt[m].copy()  # 这一步非常关键，必须对每一个List都用copy()创建，仅有上面循环的copy不够
 
 lent = [0, len(bi_bench[1]), len(bi_bench[2]), len(bi_bench[3]), len(bi_bench[4]), len(bi_bench[5]), len(bi_bench[6]),
         len(bi_bench[7])]  # 用在交叉变异函数中作为global变量，为1-7台机器的工序任务数量
@@ -433,7 +439,7 @@ if __name__=="__main__":
     record_fi=[]
     record_hifi=[] # 记录每一代最优解的目标函数值
     num_cso=[] # 记录每一代轮盘赌选出的不同个体数
-    while i<50:
+    while i<500:
         i+=1
         print('开始第',i,'次')
         bl=oss(cro_cso)  # 第二次迭代，解锁，得到解锁后的种群bl[0]
